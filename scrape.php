@@ -1,104 +1,145 @@
 <?php
-define('DOMAIN', 'http://localhost/devza/site/');  // https://k2s.cc
-define('URL', DOMAIN . 'index.php'); // Login page
-define('USERNAME', 'kngstar@gmx.de');
-define('PASS', 'hellcity');
-
-class Scrape {
-
-    public $url = '';
-    public $username = '';
-    public $password = '';
-
-    function __construct($url, $username, $password) {
-        
-        $this->url = $url;
-        $this->username = $username;
-        $this->password = $password;
-    }
-
-    /**
-     * Returns the output from scraped data
-     */
-    function getScrapeData() {
-
-        $loginParams = 'username=' . $this->username . '&password=' . $this->password;
-        $result = $this->getConnect($this->url, $loginParams);
-        return $this->parseResult($result);
-    }
-
-    /**
-     * Get the info from the parsed data
-     * @return array
-     */
-    function parseResult($html) {
-
-        libxml_use_internal_errors( true);
-        $doc = new DOMDocument;
-        $doc->loadHTML( $html);
-        $xpath = new DOMXpath( $doc);
-        $output = array();        
-        // Get account type
-        $node = $xpath->query( '//div[contains(@class, "account-type")]')->item(0);
-        if (isset($node->textContent)) {
-            $output['account_type'] = trim($node->textContent); 
-        }
-        // Get traffic left
-        $node = $xpath->query( '//div[contains(@class, "traffic-left")]')->item(0);
-        if (isset($node->textContent)) {
-            $output['traffic_left'] = trim($node->textContent); 
-        }
-        // Get used traffic data
-        $node = $xpath->query( '//div[contains(@class, "used-traffic")]')->item(0);
-        if (isset($node->textContent)) {
-            $output['used_traffic'] = trim($node->textContent); 
-        }
-        
-        return $output;
-    }
-
-    /**
-     * Make the curl request and get the entire page data
-     * @return array
-     */
-    function getConnect($url, $loginParams) {
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_USERAGENT,'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/32.0.1700.107 Chrome/32.0.1700.107 Safari/537.36');
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $loginParams);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        
-        // Store the cookie to local machine
-        $tmpfname = dirname(__FILE__) . '/'. $_COOKIE['PHPSESSID'] . '.txt';
-        curl_setopt($ch, CURLOPT_COOKIEJAR, $tmpfname);
-        curl_setopt($ch, CURLOPT_COOKIEFILE, $tmpfname);
-
-        curl_setopt($ch, CURLOPT_HEADER, false);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        
-        $res1 = curl_exec($ch);
-        if (curl_error($ch)) {
-            echo curl_error($ch);
-        }
-
-        // Another request to the profile page
-        curl_setopt($ch, CURLOPT_URL, DOMAIN . 'profile.php');
-        curl_setopt($ch, CURLOPT_POST, false);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, "");
-        $res = curl_exec($ch);
-        if (curl_error($ch)) {
-            echo curl_error($ch);
-        }
-        return $res;
-    }
-
+class k2sClass{
+	
+	public function login($username, $password){
+		$status = 'failed';
+		$message = '';
+		$result = array();
+		
+		if(!empty($username) && !empty($password)){
+			
+			// call the login api to check the details
+			$loginApi = "https://api.k2s.cc/v1/auth/token";
+			$loginParams = array("username"=>$username,"password"=>$password,"grant_type"=>"password","client_id"=>"k2s_web_app","client_secret"=>"pjc8pyZv7vhscexepFNzmu4P","csrfToken"=>"a19713af636c6");
+			
+			$curl = curl_init($loginApi);
+			curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($curl, CURLOPT_POST, true);
+			curl_setopt($curl, CURLOPT_POSTFIELDS,  json_encode($loginParams));
+			curl_setopt($curl, CURLOPT_HTTPHEADER, array('Content-Type:application/json'));
+			$result = curl_exec($curl);
+			curl_close($curl);
+			
+			$result = json_decode($result);
+			
+			if(empty($result->token_type)){
+				$message = 'Invalid details';
+			}
+			else{
+				$message = 'success';
+				$status = 'success';
+			}
+		}
+		else{
+			$message = 'Incomplete details';
+		}
+		$data = array("message"=>$message, "status"=>$status, "response"=>$result);
+		return $data;
+	}
+	
+	function getProfileDetails($accessToken,$refreshToken){
+		
+		$status = 'failed';
+		$message = '';
+		$result = array();
+		$statistics = array();
+		
+		if(!empty($accessToken) && !empty($refreshToken)){
+			$profileApi = "https://api.k2s.cc/v1/users/me";
+			
+			// prepare the headers
+			$headers = array(
+				'Content-Type: application/json',
+				'cookie: accessToken = '.$accessToken.';refreshToken='.$refreshToken.';'
+			);
+			
+			// make the curl call to profile, using GET method
+			$curl = curl_init($profileApi);
+			curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
+			$result = curl_exec($curl);
+			curl_close($curl);
+			
+			$result = json_decode($result);
+			
+			if(empty($result) || empty($result->id)){
+				$message = 'Invalid token';
+			}
+			else{
+				// get statistics
+				$statistics = $this->getStatisticsDetails($accessToken,$refreshToken);
+				$status = 'success';
+			}
+		}
+		else{
+			$message = 'Incomplete details';
+		}
+		
+		$data = array("message"=>$message, "status"=>$status, "response"=>$result,"stats"=>$statistics);
+		return $data;
+	}
+	
+	function getStatisticsDetails($accessToken,$refreshToken){
+		
+		$status = 'failed';
+		$message = '';
+		$result = array();
+		
+		if(!empty($accessToken) && !empty($refreshToken)){
+			$statsApi = "https://api.k2s.cc/v1/users/me/statistic";
+			
+			// prepare the headers
+			$headers = array(
+				'Content-Type: application/json',
+				'cookie: accessToken = '.$accessToken.';refreshToken='.$refreshToken.';'
+			);
+			
+			// make the curl call to statistics api, using GET method
+			$curl = curl_init($statsApi);
+			curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
+			$result = curl_exec($curl);
+			curl_close($curl);
+			
+			$result = json_decode($result);
+			
+			if(empty($result) || empty($result->id)){
+				$message = 'Invalid token';
+			}
+			else{
+				$status = 'success';
+			}
+		}
+		else{
+			$message = 'Incomplete details';
+		}
+		
+		$data = array("message"=>$message, "status"=>$status, "response"=>$result);
+		return $data;
+	}
 }
 
-// Call the function 
-$objScrape = new Scrape(URL, USERNAME, PASS);
-$output = $objScrape->getScrapeData();
-echo "<pre>";
-print_r($output);
+
+$username = "kngstar@gmx.de";
+$password = "hellcity";
+
+$k2Obj = new k2sClass();
+$result = $k2Obj->login($username,$password);
+
+// if the user is authenticated, we will pull the user details from profile api
+if($result['status'] == "success"){
+	
+	$accessToken = $result['response']->access_token;
+	$refreshToken = $result['response']->refresh_token;
+	$profileDetails = $k2Obj->getProfileDetails($accessToken,$refreshToken);
+	
+	if($profileDetails['status'] == 'success'){
+		echo "Account type: ".$profileDetails['response']->accountType."<br>";
+		echo "Daily Traffic: ".$profileDetails['stats']['response']->dailyTraffic->total."<br>";
+		echo "Storage Space: ".$profileDetails['stats']['response']->storageSpace->total;
+	}
+}
+else{
+	echo $result['message'];
+}
 ?>
